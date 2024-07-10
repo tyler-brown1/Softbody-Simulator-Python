@@ -22,7 +22,7 @@ floorheight = -6
 damp = .997 #
 size = 10
 ct = 0
-r = 0.00005 # constant for time change
+r = 0.00002 # constant for time change
 start = time.time()
 
 m = 1
@@ -37,41 +37,18 @@ def sub(A,B):
 def mult(A,a):
     return (A[0]*a,A[1]*a)
 
+def norm(A):
+    return sqrt(A[0]**2+A[1]**2) 
+
 def shift(A):
     return (scale*A[0]+WIDTH/2,-scale*A[1]+HEIGHT/2)
+
+def dist(A,B):
+    return sqrt(norm(sub(A,B)))
 
 def rotate(A,a):
     return (A[0]*cos(a)-A[1]*sin(a),A[0]*sin(a)+A[1]*cos(a))
 
-class Vector():
-
-    def __init__(self,x,y):
-        self.x = x
-        self.y = y
-    
-    def __add__(self,V): 
-        return Vector(self.x+V.x,self.y+V.y)
-
-    def __sub__(self,V):
-        return Vector(self.x-V.x,self.y-V.y)
-
-    def norm(self):
-        return sqrt(self.x*self.x + self.y*self.y)
-    
-    def __mul__(self,v):
-        return Vector(self.x*v,self.y*v)
-
-    def __truediv__(self,v):
-        return Vector(self.x/v,self.y/v)
-
-    def dist(self,other):
-        return (self-other).norm()
-
-    def shift(self):
-        return (scale*self.x+WIDTH/2,-scale*self.y+HEIGHT/2)
-    
-    def __repr__(self):
-        return f"Vector({self.x},{self.y})"
 
 class SoftBody():
 
@@ -84,21 +61,24 @@ class SoftBody():
             self.nodes[node.id] = node
 
     def connect(self,x,y,k = k):
-        self.connections[(x,y)] = (self.nodes[x].dist(self.nodes[y]),k)
+        self.connections[(x,y)] = (dist(self.nodes[x].p0,self.nodes[y].p0),k)
 
     def update(self):
-        accel = {id: Vector(0,-g) for id in self.nodes}
+        accel = {id:[0,-g] for id in self.nodes}
         for conn in self.connections:
             conndata = self.connections[conn]
-            X,Y = self.nodes[conn[0]], self.nodes[conn[1]]
-            x,y = conn[0], conn[1]
-            D,d,k = X.dist(Y), conndata[0], conndata[1]
+            X,Y = self.nodes[conn[0]],self.nodes[conn[1]]
+            x,y = conn[0],conn[1]
+            D,d,k = dist(X.p,Y.p),conndata[0],conndata[1]
             dcon = 1-d/D # constant used
 
-            acc = (X-Y) * (k * dcon)
+            xacc = k * dcon * (X.p[0]-Y.p[0])
+            accel[x][0] += -xacc/X.m
+            accel[y][0] += xacc/Y.m
 
-            accel[x] -= acc/X.m
-            accel[y] += acc/Y.m
+            yacc = k * dcon * (X.p[1]-Y.p[1])
+            accel[x][1] += -yacc/X.m 
+            accel[y][1] += yacc/Y.m
         
         for id in self.nodes:
             node = self.nodes[id]
@@ -110,16 +90,16 @@ class SoftBody():
             self.nodes[id].draw()
 
         for conn in self.connections: #change to lines with only some visible at some point
-            pygame.draw.line(WIN,black,self.nodes[conn[0]].p.shift(),self.nodes[conn[1]].p.shift(),1)
+            pygame.draw.line(WIN,black,shift(self.nodes[conn[0]].p),shift(self.nodes[conn[1]].p),1)
 
 
 class Node():
 
     def __init__(self,id:int,p,static=False,v=(0,0),m=m,vis=True):
         self.id = id
-        self.p0 = Vector(p[0],p[1])
-        self.p = Vector(p[0],p[1])
-        self.v = Vector(v[0],v[1])
+        self.p0 = p
+        self.p = p
+        self.v = v
         self.m = m
         self.vis = vis
         self.static = static
@@ -129,20 +109,11 @@ class Node():
     
     def draw(self):
         if self.vis:
-            pygame.draw.circle(WIN,black,self.p.shift(),2)
+            pygame.draw.circle(WIN,black,shift(self.p),4 if self.static else 2)
     
     def update(self,a):
         if not self.static:
-            self.p,self.v = self.p+self.v*r, self.v + a*(r*damp)
-    
-    def shift(self):
-        return self.p.shift()
-
-    def dist(self,other):
-        return self.p.dist(other.p)
-
-    def __sub__(self,other):
-        return self.p-other.p
+            self.p,self.v = add(self.p,mult(self.v,r*damp)),add(self.v,mult(a,r*damp))
 
 def erase_window():
     WIN.fill(white)
@@ -150,34 +121,42 @@ def erase_window():
 def draw_window():
     pygame.display.update()
 
+
 sb = SoftBody()
 def initialize():
     nodes = []
-    n = 4
-    m = 5
+    n = 3
+    m = 3
     a=.25
     for i in range(m):
         for j in range(n):
-            nodes.append(Node(n*i+j,(i*1.5,j*1.5),v=(0,0)))
-            #nodes.append(Node(n*i+j,rotate((i*1,j*1),a),v=(0,0)))
+            nodes.append(Node(n*i+j,(i*4-2,j*4),v=(2,0)))
 
     sb.add(nodes)
-    sb.add([Node(-1,(0,10),1)])
+    sb.add([Node(-1,(-6,7),1)])
+    sb.add([Node(-2,(9,6.5),1)])
+    sb.add([Node(-3,(-2,-2),m=3)])
+    sb.add([Node(-4,(1.5*m+2,-2),m=3)])
+
 
     for i in range(m):
         for j in range(n-1):
-            sb.connect(n*i+j,n*i+j+1,1000)
+            sb.connect(n*i+j,n*i+j+1,2200)
 
     for i in range(m-1):
         for j in range(n):
-            sb.connect(n*i+j,n*i+j+n,1000)
+            sb.connect(n*i+j,n*i+j+n,2200)
     
     for i in range(m-1):
         for j in range(n-1):
-            sb.connect(n*i+j,n*i+j+1+n,1000)
-            sb.connect(n*i+j+n,n*i+j+1,1000)
+            sb.connect(n*i+j,n*i+j+1+n,450)
+            sb.connect(n*i+j+n,n*i+j+1,450)      
 
-            
+    sb.connect(-1,n-1)
+    sb.connect(-2,n*m-1)      
+    sb.connect(-3,0,10)
+    sb.connect(-4,n*m-n,10)
+
 
 def main():
     
